@@ -80,6 +80,7 @@ class game_session:
         #TODO: Should this be atomic?
         ready_session = None
         active_session = self
+        #Need to re-get the teams message otherwise reactions won't be updated
         self.teams_msg = await self.cmd_channel.fetch_message(self.teams_msg.id)
         for r in self.teams_msg.reactions:
             await self.teams_msg.clear_reaction(r)
@@ -87,7 +88,13 @@ class game_session:
         red_x_emoji = "\U0000274C"
         await self.teams_msg.add_reaction(red_x_emoji)
         print("Game session started")
+    async def end_session(self):
+        global active_session
+        #TODO: move users back to neutral channel
+        print("game session ended")
+        active_session = None
 
+# Adding members to intents prevents reliability issues in fetching member lists and such
 intents = discord.Intents().default()
 intents.members = True
 client = discord.Client(intents=intents)
@@ -122,12 +129,12 @@ async def on_message(message):
 @client.event
 async def on_reaction_add(reaction, user):
     if( not user.bot ):
-        if(reaction.emoji == "\U00002705" and not user.bot):
+        if(reaction.emoji == "\U00002705"): #green check
             # TODO: Probably don't want to let people who aren't in the game start a game
             if(ready_session != None and reaction.message == ready_session.teams_msg):
                 await ready_session.start_session()
-        #If reaction is the red x:
-            # check if reaction message is game session active object's table message
-                #if so, tell game session active object to die
+        elif(reaction.emoji == "\U0000274C"): #red x
+            if(active_session != None and reaction.message == active_session.teams_msg):
+                await active_session.end_session()
 
 client.run(TOKEN)

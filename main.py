@@ -3,13 +3,16 @@ import discord
 from dotenv import load_dotenv
 import random
 import math
+import asyncio
 
 global ready_session
+global active_session
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 
 ready_session = None
+active_session = None
 
 class gameStateException(Exception):
     pass
@@ -66,9 +69,28 @@ class game_session:
         for player in team:
             team_list_str = team_list_str + player.name + "\n"
         return team_list_str
+    async def start_session(self):
+        global ready_session
+        global active_session
+        if(ready_session != self):
+            raise gameStateException
+        if(active_session != None):
+            #TODO: ping user who reacted telling them you can't start a new session until you close out the old session
+            raise gameStateException
+        #TODO: Should this be atomic?
+        ready_session = None
+        active_session = self
+        self.teams_msg = await self.cmd_channel.fetch_message(self.teams_msg.id)
+        for r in self.teams_msg.reactions:
+            await self.teams_msg.clear_reaction(r)
+        # TODO: move users to team channels
+        red_x_emoji = "\U0000274C"
+        await self.teams_msg.add_reaction(red_x_emoji)
+        print("Game session started")
 
-
-client = discord.Client()
+intents = discord.Intents().default()
+intents.members = True
+client = discord.Client(intents=intents)
 
 @client.event
 async def on_ready():
@@ -86,13 +108,11 @@ async def on_message(message):
 
     if(bot_cmd == "game"):
         #TODO: Add "exc" argument to tell bot to explicitly exclude a player
-        print(ready_session)
         try:
             session = game_session()
             await session.create_session(message)
         except gameStateException as e:
             return
-        print(ready_session)
     # elif(bot_cmd == "rollmap")
     # elif(bot_cmd == "addmap")
     # elif(bot_cmd == "delmap")
@@ -101,12 +121,13 @@ async def on_message(message):
                 
 @client.event
 async def on_reaction_add(reaction, user):
-    #If reaction is the green checkmark:
-        # check if reaction message is game session ready object's table message
-            #if so, tell game session ready object to set itself as the active session
-    #If reaction is the red x:
-        # check if reaction message is game session active object's table message
-            #if so, tell game session active object to die
-    pass
+    if( not user.bot ):
+        if(reaction.emoji == "\U00002705" and not user.bot):
+            # TODO: Probably don't want to let people who aren't in the game start a game
+            if(ready_session != None and reaction.message == ready_session.teams_msg):
+                await ready_session.start_session()
+        #If reaction is the red x:
+            # check if reaction message is game session active object's table message
+                #if so, tell game session active object to die
 
 client.run(TOKEN)

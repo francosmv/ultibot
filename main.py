@@ -5,6 +5,7 @@ import random
 import math
 import asyncio
 
+#TODO: This won't work if the bot is active in multiple guilds
 global ready_session
 global active_session
 
@@ -58,17 +59,6 @@ class game_session:
         else: # User not in a channel on that server
             await self.cmd_channel.send("You must be in a voice channel to generate teams")
             raise gameStateException()
-    def print_teams(self):
-        # Create and send the team table to the channel
-            embed = discord.Embed(title=f"**Teams:**", color=0x00109c)
-            embed.add_field(name=f"**BLU**", value=self.create_team_list_str(self.team_blu), inline=True)
-            embed.add_field(name=f"**RED**", value=self.create_team_list_str(self.team_red), inline=True)
-            return embed
-    def create_team_list_str(self, team):
-        team_list_str = ""
-        for player in team:
-            team_list_str = team_list_str + player.name + "\n"
-        return team_list_str
     async def start_session(self):
         global ready_session
         global active_session
@@ -82,17 +72,38 @@ class game_session:
         active_session = self
         #Need to re-get the teams message otherwise reactions won't be updated
         self.teams_msg = await self.cmd_channel.fetch_message(self.teams_msg.id)
+        await self.move_players(self.team_blu, "blu")
+        await self.move_players(self.team_red, "red")
+        #Wait before re-configuring reactions so that people don't accidentally immediately click the cancel reaction
+        await asyncio.sleep(5)
         for r in self.teams_msg.reactions:
             await self.teams_msg.clear_reaction(r)
-        # TODO: move users to team channels
         red_x_emoji = "\U0000274C"
         await self.teams_msg.add_reaction(red_x_emoji)
         print("Game session started")
     async def end_session(self):
         global active_session
-        #TODO: move users back to neutral channel
+        await self.move_players(self.team_blu, self.neutral_vc.name)
+        await self.move_players(self.team_red, self.neutral_vc.name)
         print("game session ended")
         active_session = None
+    async def move_players(self, player_list, chan_name):
+        chan = discord.utils.get(self.guild.voice_channels, name=chan_name)
+        if(chan == None):
+            await self.guild.create_voice_channel(chan_name)
+        for player in player_list:
+            await player.move_to(chan)
+    def create_team_list_str(self, team):
+        team_list_str = ""
+        for player in team:
+            team_list_str = team_list_str + player.name + "\n"
+        return team_list_str
+    def print_teams(self):
+        # Create and send the team table to the channel
+            embed = discord.Embed(title=f"**Teams:**", color=0x00109c)
+            embed.add_field(name=f"**BLU**", value=self.create_team_list_str(self.team_blu), inline=True)
+            embed.add_field(name=f"**RED**", value=self.create_team_list_str(self.team_red), inline=True)
+            return embed
 
 # Adding members to intents prevents reliability issues in fetching member lists and such
 intents = discord.Intents().default()

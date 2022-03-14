@@ -26,21 +26,16 @@ class game_session:
         self.team_blu = []
         self.team_red = []
         self.teams_msg = None
-    async def create_session(self, message):
+    async def create_session(self, message, exclude_players):
         global ready_session
-        self.guild = msg_guild = message.guild
+        self.guild = message.guild
         self.cmd_channel = message.channel
-        self.neutral_vc = None
-        #TODO: Discord's get and find utils work way better than this
-        for vc in self.guild.voice_channels:
-            for member in vc.members:
-                if member == message.author:
-                    self.neutral_vc = vc
-                    break
-            if(self.neutral_vc != None):
-                break
-        if((self.neutral_vc != None) and (len(self.neutral_vc.members) > 1)):
+        self.neutral_vc = message.author.voice.channel
+        if(self.neutral_vc != None):
             player_list = self.neutral_vc.members
+            for p in player_list:
+                if p in exclude_players:
+                    player_list.remove(p)
             #With odd number of players, this makes blu team always 1 bigger than red
             #TODO: On odd number of players, leave out one member, rotate who gets left out
             team_blu_sz = math.ceil(len(player_list)/2)
@@ -53,9 +48,6 @@ class game_session:
             check_emoji="\U00002705"
             await self.teams_msg.add_reaction(check_emoji)
             ready_session = self
-        elif(self.neutral_vc != None): # Have to have two members in voice channel, makes it so I don't have to deal with empty lists
-            await self.cmd_channel.send("You must have at least two members in your voice channel to generate teams")
-            raise gameStateException()
         else: # User not in a channel on that server
             await self.cmd_channel.send("You must be in a voice channel to generate teams")
             raise gameStateException()
@@ -97,6 +89,8 @@ class game_session:
         team_list_str = ""
         for player in team:
             team_list_str = team_list_str + player.name + "\n"
+        if team_list_str == "":
+            team_list_str = "-"
         return team_list_str
     def print_teams(self):
         # Create and send the team table to the channel
@@ -117,20 +111,32 @@ async def on_ready():
 @client.event
 async def on_message(message):
     bot_cmd = ""
-    #catch exceptions for empty messages - we don't want to do anything with empty messages to just leave the event
+    #catch exceptions for empty messages - we don't want to do anything with empty messages so just leave the event
     try:
         if(message.content[0] == '!'):
             bot_cmd = message.content[1:]
     except IndexError:
         return
 
-    if(bot_cmd == "game"):
-        #TODO: Add "exc" argument to tell bot to explicitly exclude a player
+    bot_cmd_split = bot_cmd.split()
+    if(bot_cmd_split[0] == "game"):
+        exclude_players = []
+        exclude_players_str = ""
+        
+        for i in range(len(bot_cmd_split)):
+            if(bot_cmd_split[i] == "exc"):
+                exclude_players_str = bot_cmd_split[i+1:]
+                break
+        for p in exclude_players_str:
+            exclude_players.append(discord.utils.get(message.guild.members, id=int(p[3:-1])))
         try:
             session = game_session()
-            await session.create_session(message)
+            await session.create_session(message, exclude_players)
         except gameStateException as e:
             return
+    elif(bot_cmd_split[0] == "end"):
+        if(active_session != None):
+            active_session.end_session()
     # elif(bot_cmd == "rollmap")
     # elif(bot_cmd == "addmap")
     # elif(bot_cmd == "delmap")

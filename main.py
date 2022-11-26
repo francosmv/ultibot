@@ -30,8 +30,8 @@ class game_session:
         global ready_session
         self.guild = message.guild
         self.cmd_channel = message.channel
-        self.neutral_vc = message.author.voice.channel
-        if(self.neutral_vc != None):
+        if(message.author.voice != None):
+            self.neutral_vc = message.author.voice.channel
             player_list = self.neutral_vc.members
             for p in player_list:
                 if p in exclude_players:
@@ -102,6 +102,7 @@ class game_session:
 # Adding members to intents prevents reliability issues in fetching member lists and such
 intents = discord.Intents().default()
 intents.members = True
+intents.message_content = True
 client = discord.Client(intents=intents)
 
 @client.event
@@ -117,26 +118,26 @@ async def on_message(message):
             bot_cmd = message.content[1:]
     except IndexError:
         return
-
-    bot_cmd_split = bot_cmd.split()
-    if(bot_cmd_split[0] == "game"):
-        exclude_players = []
-        exclude_players_str = ""
-        
-        for i in range(len(bot_cmd_split)):
-            if(bot_cmd_split[i] == "exc"):
-                exclude_players_str = bot_cmd_split[i+1:]
-                break
-        for p in exclude_players_str:
-            exclude_players.append(discord.utils.get(message.guild.members, id=int(p[3:-1])))
-        try:
-            session = game_session()
-            await session.create_session(message, exclude_players)
-        except gameStateException as e:
-            return
-    elif(bot_cmd_split[0] == "end"):
-        if(active_session != None):
-            active_session.end_session()
+    if(len(bot_cmd) > 0):
+        bot_cmd_split = bot_cmd.split()
+        if(bot_cmd_split[0] == "game"):
+            exclude_players = []
+            exclude_players_str = ""
+            
+            for i in range(len(bot_cmd_split)):
+                if(bot_cmd_split[i] == "exc"):
+                    exclude_players_str = bot_cmd_split[i+1:]
+                    break
+            for p in exclude_players_str:
+                exclude_players.append(discord.utils.get(message.guild.members, id=int(p[3:-1])))
+            try:
+                session = game_session()
+                await session.create_session(message, exclude_players)
+            except gameStateException as e:
+                return
+        elif(bot_cmd_split[0] == "end"):
+            if(active_session != None):
+                active_session.end_session()
     # elif(bot_cmd == "rollmap")
     # elif(bot_cmd == "addmap")
     # elif(bot_cmd == "delmap")

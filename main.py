@@ -59,20 +59,42 @@ class game_session:
         if(active_session != None):
             #TODO: ping user who reacted telling them you can't start a new session until you close out the old session
             raise gameStateException
-        #TODO: Should this be atomic?
-        ready_session = None
-        active_session = self
         #Need to re-get the teams message otherwise reactions won't be updated
         self.teams_msg = await self.cmd_channel.fetch_message(self.teams_msg.id)
-        await self.move_players(self.team_blu, "blu")
-        await self.move_players(self.team_red, "red")
-        #Wait before re-configuring reactions so that people don't accidentally immediately click the cancel reaction
-        await asyncio.sleep(5)
+        #Require that every player in the game add a checkmark reaction to actually start the game
+        game_ready = True
+        player_ready_list = []
+        for p in self.team_blu:
+            player_ready_state = (p, False)
+            player_ready_list.append(player_ready_state)
+        for p in self.team_red:
+            player_ready_state = (p, False)
+            player_ready_list.append(player_ready_state)
         for r in self.teams_msg.reactions:
-            await self.teams_msg.clear_reaction(r)
-        red_x_emoji = "\U0000274C"
-        await self.teams_msg.add_reaction(red_x_emoji)
-        print("Game session started")
+            if(r.emoji == "\U00002705"):
+                async for u in r.users():
+                    for p in player_ready_list:
+                        if p[0].id == u.id:
+                            ready_state = (p[0], True)
+                            player_ready_list.append(ready_state)
+                            player_ready_list.remove(p)
+                            break
+        for p in player_ready_list:
+            if p[1] == False:
+                game_ready = False
+        if game_ready:
+            #TODO: Should this be atomic?
+            ready_session = None
+            active_session = self
+            await self.move_players(self.team_blu, "blu")
+            await self.move_players(self.team_red, "red")
+            #Wait before re-configuring reactions so that people don't accidentally immediately click the cancel reaction
+            await asyncio.sleep(5)
+            for r in self.teams_msg.reactions:
+                await self.teams_msg.clear_reaction(r)
+            red_x_emoji = "\U0000274C"
+            await self.teams_msg.add_reaction(red_x_emoji)
+            print("Game session started")
     async def end_session(self):
         global active_session
         await self.move_players(self.team_blu, self.neutral_vc.name)
@@ -129,7 +151,9 @@ async def on_message(message):
                     exclude_players_str = bot_cmd_split[i+1:]
                     break
             for p in exclude_players_str:
-                exclude_players.append(discord.utils.get(message.guild.members, id=int(p[3:-1])))
+                if(p[0] == '<'):
+                    exclude_players.append(discord.utils.get(message.guild.members, id=int(p[2:-1])))
+                    print(exclude_players)
             try:
                 session = game_session()
                 await session.create_session(message, exclude_players)
@@ -137,7 +161,10 @@ async def on_message(message):
                 return
         elif(bot_cmd_split[0] == "end"):
             if(active_session != None):
-                active_session.end_session()
+                await active_session.end_session()
+        elif(bot_cmd == "cancel"):
+            global ready_session
+            ready_session = None
     # elif(bot_cmd == "rollmap")
     # elif(bot_cmd == "addmap")
     # elif(bot_cmd == "delmap")

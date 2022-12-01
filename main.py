@@ -16,6 +16,8 @@ ready_session = None
 active_session = None
 split_vc = False
 active_channels = []
+red_vc = "red"
+blu_vc = "blu"
 
 class gameStateException(Exception):
     pass
@@ -59,6 +61,8 @@ class game_session:
         global ready_session
         global active_session
         global split_vc
+        global blu_vc
+        global red_vc
         if split_vc:
             if(ready_session != self):
                 raise gameStateException
@@ -92,8 +96,8 @@ class game_session:
                 #TODO: Should this be atomic?
                 ready_session = None
                 active_session = self
-                await self.move_players(self.team_blu, "blu")
-                await self.move_players(self.team_red, "red")
+                await self.move_players(self.team_blu, blu_vc)
+                await self.move_players(self.team_red, red_vc)
                 #Wait before re-configuring reactions so that people don't accidentally immediately click the cancel reaction
                 await asyncio.sleep(5)
                 for r in self.teams_msg.reactions:
@@ -135,6 +139,12 @@ intents.members = True
 intents.message_content = True
 client = discord.Client(intents=intents)
 
+async def print_vc_config(message):
+    embed = discord.Embed(title=f"**Voice Channel Configuration:**", color=0x00109c)
+    embed.add_field(name=f"**BLU**", value=blu_vc, inline=True)
+    embed.add_field(name=f"**RED**", value=red_vc, inline=True)
+    await message.channel.send(embed=embed)
+
 @client.event
 async def on_ready():
     print(f'{client.user} has connected to Discord!')
@@ -145,6 +155,8 @@ async def on_message(message):
     global active_session
     global ready_session
     global active_channels
+    global blu_vc
+    global red_vc
     bot_cmd = ""
     #catch exceptions for empty messages - we don't want to do anything with empty messages so just leave the event
     try:
@@ -196,6 +208,35 @@ async def on_message(message):
                 elif(bot_cmd_split[0] == "removechannel"):
                     active_channels.remove(message.channel)
                     await message.channel.send("Current channel removed from active channels")
+                elif(bot_cmd_split[0] == "showvc"):
+                    await print_vc_config(message)
+                elif(bot_cmd_split[0] == "redvc"):
+                    if(len(bot_cmd_split) > 1):
+                        red_vc = bot_cmd_split[1]
+                        await print_vc_config(message)
+                    else:
+                        await message.channel.send("missing voice channel argument")
+                elif(bot_cmd_split[0] == "bluvc"):
+                    if(len(bot_cmd_split) > 1):
+                        blu_vc = bot_cmd_split[1]
+                        await print_vc_config(message)
+                    else:
+                        await message.channel.send("missing voice channel argument")
+                elif(bot_cmd_split[0] == "currentvc"):
+                    if(message.author.voice == None):
+                        await message.channel.send("You must be in a voice channel to use this command")
+                    elif(len(bot_cmd_split) < 2):
+                        await message.channel.send("missing team argument")
+                    else:
+                        if(bot_cmd_split[1] == "blu"):
+                            blu_vc = message.author.voice.channel.name
+                            await print_vc_config(message)
+                        elif(bot_cmd_split[1] == "red"):
+                            red_vc = message.author.voice.channel.name
+                            await print_vc_config(message)
+                        else:
+                            await message.channel.send("Invalid team specified")
+                        
     # elif(bot_cmd == "rollmap")
     # elif(bot_cmd == "addmap")
     # elif(bot_cmd == "delmap")
@@ -206,7 +247,6 @@ async def on_message(message):
 async def on_reaction_add(reaction, user):
     if( not user.bot ):
         if(reaction.emoji == "\U00002705"): #green check
-            # TODO: Probably don't want to let people who aren't in the game start a game
             if(ready_session != None and reaction.message == ready_session.teams_msg):
                 await ready_session.start_session()
         elif(reaction.emoji == "\U0000274C"): #red x

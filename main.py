@@ -4,20 +4,45 @@ from dotenv import load_dotenv
 import random
 import math
 import asyncio
+import json
 
-#TODO: This won't work if the bot is active in multiple guilds
-global ready_session
-global active_session
-
+#TODO: Make settings be per-server
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
+#TODO: if we pass in a dict of defaults on init this will work for both global settings and per-server settings
+class settings_container:
+    def __init__(self, filename):
+        self.filename = filename + ".json"
+        with open(self.filename, "r+") as settings_file:
+            try:
+                self.settings_dict = json.load(settings_file)
+            except json.JSONDecodeError:
+                self.settings_dict = dict()
+        self.validate_dict()
+        self.dump_settings()
+    def validate_dict(self):
+        if("split_vc" not in self.settings_dict):
+            self.settings_dict["split_vc"] = False
+        if("active_channels" not in self.settings_dict):
+            self.settings_dict["active_channels"] = []
+        if("red_vc" not in self.settings_dict):
+            self.settings_dict["red_vc"] = "red"
+        if("blu_vc" not in self.settings_dict):
+            self.settings_dict["blu_vc"] = "blu"
+    def dump_settings(self):
+        with open(self.filename, "w") as settings_file:
+            json.dump(self.settings_dict, settings_file, indent=2)
+
 
 ready_session = None
 active_session = None
-split_vc = False
-active_channels = []
-red_vc = "red"
-blu_vc = "blu"
+
+# Adding members to intents prevents reliability issues in fetching member lists and such
+intents = discord.Intents().default()
+intents.members = True
+intents.message_content = True
+client = discord.Client(intents=intents)
+global_settings = settings_container("global_settings")
 
 class gameStateException(Exception):
     pass
@@ -32,7 +57,7 @@ class game_session:
         self.teams_msg = None
     async def create_session(self, message, exclude_players):
         global ready_session
-        global split_vc
+        global global_settings
         self.guild = message.guild
         self.cmd_channel = message.channel
         if(message.author.voice != None):
@@ -50,7 +75,7 @@ class game_session:
                 del player_list[idx]
             self.team_red = player_list
             self.teams_msg = await self.cmd_channel.send(embed=self.print_teams())
-            if split_vc:
+            if global_settings.settings_dict["split_vc"]:
                 check_emoji="\U00002705"
                 await self.teams_msg.add_reaction(check_emoji)
             ready_session = self
@@ -60,10 +85,8 @@ class game_session:
     async def start_session(self):
         global ready_session
         global active_session
-        global split_vc
-        global blu_vc
-        global red_vc
-        if split_vc:
+        global global_settings
+        if global_settings.settings_dict["split_vc"]:
             if(ready_session != self):
                 raise gameStateException
             if(active_session != None):
@@ -96,8 +119,9 @@ class game_session:
                 #TODO: Should this be atomic?
                 ready_session = None
                 active_session = self
-                await self.move_players(self.team_blu, blu_vc)
-                await self.move_players(self.team_red, red_vc)
+                #TODO: create the channels first if they don't exist, wait, then move into channel
+                await self.move_players(self.team_blu, global_settings.settings_dict["blu_vc"])
+                await self.move_players(self.team_red, global_settings.settings_dict["red_vc"])
                 #Wait before re-configuring reactions so that people don't accidentally immediately click the cancel reaction
                 await asyncio.sleep(5)
                 for r in self.teams_msg.reactions:
@@ -107,8 +131,8 @@ class game_session:
             print("Game session started")
     async def end_session(self):
         global active_session
-        global split_vc
-        if split_vc:
+        global global_settings
+        if global_settings.settings_dict["split_vc"]:
             await self.move_players(self.team_blu, self.neutral_vc.name)
             await self.move_players(self.team_red, self.neutral_vc.name)
         print("game session ended")
@@ -133,16 +157,11 @@ class game_session:
             embed.add_field(name=f"**RED**", value=self.create_team_list_str(self.team_red), inline=True)
             return embed
 
-# Adding members to intents prevents reliability issues in fetching member lists and such
-intents = discord.Intents().default()
-intents.members = True
-intents.message_content = True
-client = discord.Client(intents=intents)
-
 async def print_vc_config(message):
+    global global_settings
     embed = discord.Embed(title=f"**Voice Channel Configuration:**", color=0x00109c)
-    embed.add_field(name=f"**BLU**", value=blu_vc, inline=True)
-    embed.add_field(name=f"**RED**", value=red_vc, inline=True)
+    embed.add_field(name=f"**BLU**", value=global_settings.settings_dict["blu_vc"], inline=True)
+    embed.add_field(name=f"**RED**", value=global_settings.settings_dict["red_vc"], inline=True)
     await message.channel.send(embed=embed)
 
 @client.event
@@ -151,12 +170,9 @@ async def on_ready():
 
 @client.event
 async def on_message(message):
-    global split_vc
+    global global_settings
     global active_session
     global ready_session
-    global active_channels
-    global blu_vc
-    global red_vc
     bot_cmd = ""
     #catch exceptions for empty messages - we don't want to do anything with empty messages so just leave the event
     try:
@@ -166,11 +182,13 @@ async def on_message(message):
         return
     if(len(bot_cmd) > 0):
         bot_cmd_split = bot_cmd.split()
-        if(bot_cmd_split[0] == "addchannel"):
-            active_channels.append(message.channel)
+        if(bot_cmd_split[0] == "addchannel"): #this is the only message the bot listens for on every channel - so that server owners can restrict the bot to certain channels
+            print(message.channel.id)
+            global_settings.settings_dict["active_channels"].append(message.channel.id)
+            global_settings.dump_settings()
             await message.channel.send("Adding current channel to active channels")
         else:
-            if(message.channel in active_channels):
+            if(message.channel.id in global_settings.settings_dict["active_channels"]):
                 if(bot_cmd_split[0] == "game"):
                     exclude_players = []
                     exclude_players_str = ""
@@ -197,28 +215,32 @@ async def on_message(message):
                     if(active_session != None):
                         await message.channel.send("Cannot configure voicechat settings while game session is active")
                     else:
-                        split_vc = True
+                        global_settings.settings_dict["split_vc"] = True
+                        global_settings.dump_settings()
                         await message.channel.send("Voice chat splitting enabled")
                 elif(bot_cmd_split[0] == "splitvcdisable"):
                     if(active_session != None):
                         await message.channel.send("Cannot configure voicechat settings while game session is active")
                     else:
-                        split_vc = False
+                        global_settings.settings_dict["split_vc"] = False
+                        global_settings.dump_settings()
                         await message.channel.send("Voice chat splitting disabled")
                 elif(bot_cmd_split[0] == "removechannel"):
-                    active_channels.remove(message.channel)
+                    global_settings.settings_dict["active_channels"].remove(message.channel.id)
                     await message.channel.send("Current channel removed from active channels")
                 elif(bot_cmd_split[0] == "showvc"):
                     await print_vc_config(message)
                 elif(bot_cmd_split[0] == "redvc"):
                     if(len(bot_cmd_split) > 1):
-                        red_vc = bot_cmd_split[1]
+                        global_settings.settings_dict["red_vc"] = bot_cmd_split[1]
+                        global_settings.dump_settings()
                         await print_vc_config(message)
                     else:
                         await message.channel.send("missing voice channel argument")
                 elif(bot_cmd_split[0] == "bluvc"):
                     if(len(bot_cmd_split) > 1):
-                        blu_vc = bot_cmd_split[1]
+                        global_settings.settings_dict["blu_vc"] = bot_cmd_split[1]
+                        global_settings.dump_settings()
                         await print_vc_config(message)
                     else:
                         await message.channel.send("missing voice channel argument")
@@ -229,14 +251,18 @@ async def on_message(message):
                         await message.channel.send("missing team argument")
                     else:
                         if(bot_cmd_split[1] == "blu"):
-                            blu_vc = message.author.voice.channel.name
+                            global_settings.settings_dict["blu_vc"] = message.author.voice.channel.name
+                            global_settings.dump_settings()
                             await print_vc_config(message)
                         elif(bot_cmd_split[1] == "red"):
-                            red_vc = message.author.voice.channel.name
+                            global_settings.settings_dict["red_vc"] = message.author.voice.channel.name
+                            global_settings.dump_settings()
                             await print_vc_config(message)
                         else:
                             await message.channel.send("Invalid team specified")
-                        
+    # elif(bot_cmd == "resetconfig")
+    # elif(bot_cmd == "showconfig")
+    # elif(bot_cmd == "help")
     # elif(bot_cmd == "rollmap")
     # elif(bot_cmd == "addmap")
     # elif(bot_cmd == "delmap")

@@ -244,6 +244,13 @@ async def on_message(message):
                         await print_vc_config(message)
                     else:
                         await message.channel.send("missing voice channel argument")
+                elif(bot_cmd_split[0] == "coinflip"):
+                    result = random.randint(0, 1)
+                    if result == 0:
+                        value = "Heads"
+                    else:
+                        value = "Tails"
+                    await message.channel.send(value)
                 elif(bot_cmd_split[0] == "currentvc"):
                     if(message.author.voice == None):
                         await message.channel.send("You must be in a voice channel to use this command")
